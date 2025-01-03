@@ -138,24 +138,29 @@ Another example, if we move between this two steps
        - 0 $ X          - 0 0 $
 We need to send the following delta: [((2,2), Apple), ((4,3), Snake), ((4,4), SnakeHead)]
 -}
-move :: BoardInfo -> GameState -> (Board.RenderMessage, GameState)
+move :: BoardInfo -> GameState -> ([Board.RenderMessage], GameState)
 move brd@BoardInfo{height, width} st@GameState{snakeSeq = snake@SnakeSeq{snakeHead, snakeBody}, applePosition}
-  | length snakeBody == height * width - 1 || inSnake head' snake = (Board.GameOver, st)
+  | length snakeBody == height * width - 1 || inSnake head' snake = ([Board.GameOver], st)
   | head' == applePosition =
       let st1@GameState{applePosition = applePosition'} = st' True
-       in ( Board.RenderBoard
-              [ (applePosition', Board.Apple)
-              , (snakeHead, if null snakeBody then Board.Empty else Board.Snake)
-              , (head', Board.SnakeHead)
-              ]
+       in (
+            [ Board.RenderBoard
+                [ (applePosition', Board.Apple)
+                , (snakeHead, if null snakeBody then Board.Empty else Board.Snake)
+                , (head', Board.SnakeHead)
+                ]
+            , Board.IncrementScore
+            ]
           , st1
           )
   | otherwise =
-      ( Board.RenderBoard
-          [ (snakeHead, if null snakeBody then Board.Empty else Board.Snake)
-          , (head', Board.SnakeHead)
-          , (snakePts !! (length snakePts - 1), Board.Empty)
-          ]
+      (
+        [ Board.RenderBoard
+            [ (snakeHead, if null snakeBody then Board.Empty else Board.Snake)
+            , (head', Board.SnakeHead)
+            , (snakePts !! (length snakePts - 1), Board.Empty)
+            ]
+        ]
       , st' False
       )
  where

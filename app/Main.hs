@@ -6,18 +6,21 @@ import Control.Concurrent (
   forkIO,
   threadDelay,
  )
+import Control.Monad (unless)
+import Data.ByteString.Builder qualified as B
+import Data.ByteString.Lazy qualified as BL
 import EventQueue (
   Event (Tick, UserEvent),
-  EventQueue (initialSpeed),
+  EventQueue,
   readEvent,
+  setSpeed,
   writeUserInput,
  )
 import GameState (GameState (movement), move, opositeMovement)
 import Initialization (gameInitialization)
-import RenderState (BoardInfo, RenderState (gameOver), render, updateRenderState)
+import RenderState (BoardInfo, RenderState (RenderState, gameOver, score), render, updateMessages)
 import System.Environment (getArgs)
 import System.IO (BufferMode (NoBuffering), hSetBinaryMode, hSetBuffering, hSetEcho, stdin, stdout)
-import Control.Monad (unless)
 
 -- The game loop is easy:
 --   - wait some time
@@ -26,8 +29,9 @@ import Control.Monad (unless)
 --   - Update the RenderState based on message delivered by GameState update
 --   - Render into the console
 gameloop :: BoardInfo -> GameState -> RenderState -> EventQueue -> IO ()
-gameloop binf gstate rstate queue = do
-  threadDelay $ initialSpeed queue
+gameloop binf gstate rstate@RenderState{score} queue = do
+  speed <- setSpeed score queue
+  threadDelay speed
   event <- readEvent queue
   let (delta, gstate') =
         case event of
@@ -36,10 +40,10 @@ gameloop binf gstate rstate queue = do
             if movement gstate == opositeMovement m
               then move binf gstate
               else move binf $ gstate{movement = m}
-  let rstate' = updateRenderState rstate delta
+  let rstate' = updateMessages rstate delta
       isGameOver = gameOver rstate'
-  putStr "\ESC[2J" --This cleans the console screen
-  putStr $ render binf rstate'
+  putStr "\ESC[2J" -- This cleans the console screen
+  BL.putStr $ B.toLazyByteString $ render binf rstate'
   unless isGameOver $ gameloop binf gstate' rstate' queue
 
 -- | main.

@@ -16,7 +16,7 @@ import Control.Concurrent.BoundedChan (
   tryWriteChan,
  )
 import GameState (Movement (..))
-import qualified GameState as Snake
+import GameState qualified as Snake
 import System.IO (hReady, stdin)
 
 -- | The are two kind of events, a `ClockEvent`, representing movement which is not force by the user input, and `UserEvent` which is the opposite.
@@ -27,20 +27,21 @@ type UserInputQueue = BoundedChan Snake.Movement
 
 -- | The `EventQueue` has a `UserInputQueue` and the global speed of consumption (as a mutable reference) and the initial speed of the game.
 data EventQueue = EventQueue
-  { -- | An asynchronous queue of movements the snake needs to do.
-    userInput :: UserInputQueue
-  , -- | A mutable reference to a Int. This is used for modifying the speed of the game as we play
-    currentSpeed :: MVar Int
-  , -- | The initial speed
-    initialSpeed :: Int
+  { userInput :: UserInputQueue
+  -- ^ An asynchronous queue of movements the snake needs to do.
+  , currentSpeed :: MVar Int
+  -- ^ A mutable reference to a Int. This is used for modifying the speed of the game as we play
+  , initialSpeed :: Int
+  -- ^ The initial speed
   }
 
--- | Given the current score and the initial speed, calculates the new speed.
---   The speed is increased by 10% every 10 points, up to 50 points.
+{- | Given the current score and the initial speed, calculates the new speed.
+  The speed is increased by 10% every 10 points, up to 50 points.
+-}
 calculateSpeed :: Int -> Int -> Int
 calculateSpeed score initialSpeed =
   let level = min score 50 `quot` 10 -- maximun of 5 levels every 10 apples
-      speedFactor = 1 - fromIntegral level / 10.0 -- every level speeds up the time by a 10%
+      speedFactor = 1 - fromIntegral level / 50.0
    in floor @Double $ fromIntegral initialSpeed * speedFactor
 
 {- | Given the current score and the event queue, updates the new speed and returns it.
@@ -79,8 +80,8 @@ writeUserInput :: EventQueue -> IO ()
 writeUserInput queue@(EventQueue userqueue _ _) = do
   c <- getKey
   case parseUserInput c of
-    Just dir -> tryWriteChan userqueue dir >> writeUserInput queue 
-    Nothing  -> writeUserInput queue
+    Just dir -> tryWriteChan userqueue dir >> writeUserInput queue
+    Nothing -> writeUserInput queue
 
 {- | Parse common arrow-like keys
 - \ESC[A/D/C/B are the escape codes for the arrow keys.
@@ -88,23 +89,18 @@ writeUserInput queue@(EventQueue userqueue _ _) = do
 - wasd are common in games
 -}
 parseUserInput :: String -> Maybe Snake.Movement
-
 parseUserInput "\ESC[A" = Just Snake.North
 parseUserInput "w" = Just Snake.North
 parseUserInput "k" = Just Snake.North
-
 parseUserInput "\ESC[D" = Just Snake.West
 parseUserInput "a" = Just Snake.West
 parseUserInput "h" = Just Snake.West
-
 parseUserInput "\ESC[C" = Just Snake.East
 parseUserInput "d" = Just Snake.East
 parseUserInput "l" = Just Snake.East
-
 parseUserInput "\ESC[B" = Just Snake.South
 parseUserInput "s" = Just Snake.South
 parseUserInput "j" = Just Snake.South
-
 parseUserInput _ = Nothing
 
 -- | Read the EventQueue and generates an Event to pass to the user logic

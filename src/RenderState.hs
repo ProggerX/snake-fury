@@ -22,6 +22,8 @@ module RenderState where
 
 -- This are all imports you need. Feel free to import more things.
 import Data.Array (Array, assocs, listArray, (//))
+import Data.ByteString.Builder (Builder)
+import Data.ByteString.Builder qualified as B
 import Data.Foldable (foldl')
 
 -- A point is just a tuple of integers.
@@ -46,10 +48,10 @@ type DeltaBoard = [(Point, CellType)]
   Right now Possible messages are a RenderBoard with a payload indicating which cells change
   or a GameOver message.
 -}
-data RenderMessage = RenderBoard DeltaBoard | GameOver deriving (Show)
+data RenderMessage = RenderBoard DeltaBoard | IncrementScore | GameOver deriving (Show)
 
 -- | The RenderState contains the board and if the game is over or not.
-data RenderState = RenderState {board :: Board, gameOver :: Bool} deriving (Show)
+data RenderState = RenderState {board :: Board, gameOver :: Bool, score :: Int} deriving (Show)
 
 -- | Given The board info, this function should return a board with all Empty cells
 emptyGrid :: BoardInfo -> Board
@@ -70,7 +72,7 @@ buildInitialBoard ::
   -- | initial Point of the apple
   Point ->
   RenderState
-buildInitialBoard brd snake apple = RenderState{board = brd', gameOver = False}
+buildInitialBoard brd snake apple = RenderState{board = brd', gameOver = False, score = 0}
  where
   brd' = emptyGrid brd // [(snake, SnakeHead), (apple, Apple), ((fst snake, snd snake - 1), Snake)]
 
@@ -83,7 +85,11 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
 -- | Given tye current render state, and a message -> update the render state
 updateRenderState :: RenderState -> RenderMessage -> RenderState
 updateRenderState st GameOver = st{gameOver = True}
+updateRenderState st@RenderState{score} IncrementScore = st{score = score + 10}
 updateRenderState st@RenderState{board} (RenderBoard delta) = st{board = board // delta}
+
+updateMessages :: RenderState -> [RenderMessage] -> RenderState
+updateMessages = foldl' updateRenderState
 
 {-
 This is a test for updateRenderState
@@ -109,19 +115,32 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
     Apple -> "X "
   In other to avoid shrinking, I'd recommend to use some charachter followed by an space.
 -}
-ppCell :: CellType -> String
+ppCell :: CellType -> Builder
 ppCell = \case
   Empty -> "- "
   Snake -> "0 "
   SnakeHead -> "$ "
   Apple -> "X "
 
+ppScore :: Int -> Builder
+ppScore s =
+  mconcat
+    [ "----------\n"
+    , "score: "
+    , B.intDec s
+    , "\n----------\n"
+    ]
+
 {- | convert the RenderState in a String ready to be flushed into the console.
   It should return the Board with a pretty look. If game over, return the empty board.
 -}
-render :: BoardInfo -> RenderState -> String
+render :: BoardInfo -> RenderState -> Builder
 render _ RenderState{gameOver = True} = "Game Over!"
-render BoardInfo{width} RenderState{board} = foldl' (\old ((_, x), c) -> old ++ ppCell c ++ if x == width then "\n" else "") "" (assocs board)
+render BoardInfo{width} RenderState{board, score} =
+  mconcat
+    [ ppScore score
+    , foldl' (\old ((_, x), c) -> mconcat [old, ppCell c, if x == width then "\n" else ""]) "" (assocs board)
+    ]
 
 {-
 This is a test for render. It should return:
