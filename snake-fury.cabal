@@ -39,7 +39,7 @@ library
     , transformers
     , mtl
     , random
-  default-language: Haskell2010
+  default-language: GHC2021
 
 executable snake-fury
   main-is: Main.hs
@@ -54,5 +54,5 @@ executable snake-fury
       base
     , snake-fury
     , bytestring
-  default-language: Haskell2010
+  default-language: GHC2021
 

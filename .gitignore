@@ -1,5 +1,6 @@
 .stack-work/
 *~
 profile/
+.direnv
 dist-newstyle
 mergeCascade.sh
