@@ -7,6 +7,7 @@ module GameState where
 
 -- These are all the import. Feel free to use more if needed.
 
+import Control.Monad.Trans.State.Strict (State, get, modify, put, runState, state)
 import Data.Foldable
 import Data.Maybe (isJust)
 import Data.Sequence (Seq (..), (<|))
@@ -23,6 +24,8 @@ data Movement = North | South | East | West deriving (Show, Eq)
   sequence can't represent a valid Snake, therefore we must use a non empty one.
   You should investigate about Seq type in haskell and we it is a good option for our porpouse.
 -}
+
+-- NOTE: Body is never empty
 data SnakeSeq = SnakeSeq {snakeHead :: Point, snakeBody :: Seq Point} deriving (Show, Eq)
 
 {- | The GameState represents all important bits in the game. The Snake, The apple, the current direction of movement and
@@ -35,6 +38,8 @@ data GameState = GameState
   , randomGen :: StdGen
   }
   deriving (Show, Eq)
+
+type GameStep a = State GameState a
 
 -- | This function should calculate the opposite movement.
 opositeMovement :: Movement -> Movement
@@ -56,8 +61,12 @@ opositeMovement East = West
   You should take a look to System.Random documentation.
   Also, in the import list you have all relevant functions.
 -}
-makeRandomPoint :: BoardInfo -> StdGen -> (Point, StdGen)
-makeRandomPoint BoardInfo{height, width} = randomR ((1, 1), (height, width))
+makeRandomPoint :: BoardInfo -> GameStep Point
+makeRandomPoint BoardInfo{height, width} = do
+  st@GameState{randomGen} <- get
+  let (pt, gen') = randomR ((1, 1), (height, width)) randomGen
+  put st{randomGen = gen'}
+  pure pt
 
 {-
 We can't test makeRandomPoint, because different implementation may lead to different valid result.
@@ -112,13 +121,11 @@ True
 -- >>> nextHead board_info game_state3 == (4,1)
 
 -- | Calculates a new random apple, avoiding creating the apple in the same place, or in the snake body
-newApple :: BoardInfo -> GameState -> (Point, StdGen)
-newApple brd state@GameState{snakeSeq, applePosition, randomGen}
-  | pt `notElem` (applePosition : snake) = (pt, newGen)
-  | otherwise = newApple brd state{randomGen = newGen}
- where
-  (pt, newGen) = makeRandomPoint brd randomGen
-  snake = snakePoints snakeSeq
+newApple :: BoardInfo -> GameStep Point
+newApple brd = do
+  pt <- makeRandomPoint brd
+  modify (\old -> old{applePosition = pt})
+  pure pt
 
 {- We can't test this function because it depends on makeRandomPoint -}
 
@@ -138,49 +145,50 @@ Another example, if we move between this two steps
        - 0 $ X          - 0 0 $
 We need to send the following delta: [((2,2), Apple), ((4,3), Snake), ((4,4), SnakeHead)]
 -}
+step :: BoardInfo -> GameStep [Board.RenderMessage]
+step brd@BoardInfo{height, width} = do
+  st@GameState{snakeSeq = snake@SnakeSeq{snakeBody}, applePosition} <- get
+  let head' = nextHead brd st
+  if length snakeBody == height * width - 1 || inSnake head' snake
+    then pure [Board.GameOver]
+    else
+      if head' == applePosition
+        then do
+          msg <- extendSnake head' brd
+          pure [Board.IncrementScore, Board.RenderBoard msg]
+        else do
+          msg <- displaceSnake head' brd
+          pure [Board.RenderBoard msg]
+
 move :: BoardInfo -> GameState -> ([Board.RenderMessage], GameState)
-move brd@BoardInfo{height, width} st@GameState{snakeSeq = snake@SnakeSeq{snakeHead, snakeBody}, applePosition}
-  | length snakeBody == height * width - 1 || inSnake head' snake = ([Board.GameOver], st)
-  | head' == applePosition =
-      let st1@GameState{applePosition = applePosition'} = st' True
-       in (
-            [ Board.RenderBoard
-                [ (applePosition', Board.Apple)
-                , (snakeHead, if null snakeBody then Board.Empty else Board.Snake)
-                , (head', Board.SnakeHead)
-                ]
-            , Board.IncrementScore
-            ]
-          , st1
-          )
-  | otherwise =
-      (
-        [ Board.RenderBoard
-            [ (snakeHead, if null snakeBody then Board.Empty else Board.Snake)
-            , (head', Board.SnakeHead)
-            , (snakePts !! (length snakePts - 1), Board.Empty)
-            ]
-        ]
-      , st' False
-      )
- where
-  head' = nextHead brd st
-  body' ateApple
-    | ateApple = snakeHead <| snakeBody
-    | otherwise = snakeHead <| seqInit snakeBody
-  snake' = SnakeSeq head' . body'
-  snakePts = snakePoints snake
-  st' ateApple
-    | ateApple =
-        let st1 = st{snakeSeq = snake' True}
-            (applePosition', randomGen') = newApple brd st1
-         in st1{applePosition = applePosition', randomGen = randomGen'}
-    | otherwise = st{snakeSeq = snake' False}
+move = runState . step
 
 seqInit :: Seq a -> Seq a
 seqInit = \case
   s :|> _ -> s
   Empty -> Empty
+
+extendSnake :: Point -> BoardInfo -> GameStep DeltaBoard
+extendSnake head' brd = do
+  GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} <- get
+  modify (\old -> old{snakeSeq = SnakeSeq head' $ snakeHead <| snakeBody})
+  applePosition' <- newApple brd
+
+  pure
+    [ (applePosition', Board.Apple)
+    , (snakeHead, Board.Snake)
+    , (head', Board.SnakeHead)
+    ]
+
+displaceSnake :: Point -> BoardInfo -> GameStep DeltaBoard
+displaceSnake head' _ = do
+  GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} <- get
+  modify (\old -> old{snakeSeq = SnakeSeq head' $ snakeHead <| seqInit snakeBody})
+  pure
+    [ (snakeHead, Board.Snake)
+    , (head', Board.SnakeHead)
+    , (snakeBody `Seq.index` (length snakeBody - 1), Board.Empty)
+    ]
 
 {- This is a test for move. It should return
 
