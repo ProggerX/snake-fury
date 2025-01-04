@@ -1,4 +1,7 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 {- |
 This module defines the logic of the game and the communication with the `Board.RenderState`
@@ -7,7 +10,10 @@ module GameState where
 
 -- These are all the import. Feel free to use more if needed.
 
-import Control.Monad.Trans.State.Strict (State, get, modify, put, runState, state)
+import Control.Monad.State.Strict (state)
+import Control.Monad.Trans.Class (MonadTrans (lift))
+import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask, runReader)
+import Control.Monad.Trans.State.Strict (State, get, modify, put, runState)
 import Data.Foldable
 import Data.Maybe (isJust)
 import Data.Sequence (Seq (..), (<|))
@@ -39,34 +45,27 @@ data GameState = GameState
   }
   deriving (Show, Eq)
 
-type GameStep a = State GameState a
+type GameStep = ReaderT BoardInfo (State GameState)
 
 -- | This function should calculate the opposite movement.
 opositeMovement :: Movement -> Movement
-opositeMovement North = South
-opositeMovement South = North
-opositeMovement West = East
-opositeMovement East = West
-
--- >>> opositeMovement North == South
--- >>> opositeMovement South == North
--- >>> opositeMovement East == West
--- >>> opositeMovement West == East
--- True
--- True
--- True
--- True
+opositeMovement = \case
+  North -> South
+  South -> North
+  West -> East
+  East -> West
 
 {- | Purely creates a random point within the board limits
   You should take a look to System.Random documentation.
   Also, in the import list you have all relevant functions.
 -}
-makeRandomPoint :: BoardInfo -> GameStep Point
-makeRandomPoint BoardInfo{height, width} = do
-  st@GameState{randomGen} <- get
-  let (pt, gen') = randomR ((1, 1), (height, width)) randomGen
-  put st{randomGen = gen'}
-  pure pt
+makeRandomPoint :: GameStep Point
+makeRandomPoint = do
+  BoardInfo{height, width} <- ask
+  zoomRandomGen $ randomR ((1, 1), (height, width))
+
+zoomRandomGen :: (StdGen -> (a, StdGen)) -> GameStep a
+zoomRandomGen f = state \st -> let (a, randomGen) = f st.randomGen in (a, st{randomGen})
 
 {-
 We can't test makeRandomPoint, because different implementation may lead to different valid result.
@@ -121,11 +120,15 @@ True
 -- >>> nextHead board_info game_state3 == (4,1)
 
 -- | Calculates a new random apple, avoiding creating the apple in the same place, or in the snake body
-newApple :: BoardInfo -> GameStep Point
-newApple brd = do
-  pt <- makeRandomPoint brd
-  modify (\old -> old{applePosition = pt})
-  pure pt
+newApple :: GameStep Point
+newApple = do
+  pt <- makeRandomPoint
+  st@GameState{snakeSeq, applePosition} <- lift get
+  if inSnake pt snakeSeq || pt == applePosition
+    then newApple
+    else do
+      lift $ put st{applePosition = pt}
+      pure pt
 
 {- We can't test this function because it depends on makeRandomPoint -}
 
@@ -145,34 +148,34 @@ Another example, if we move between this two steps
        - 0 $ X          - 0 0 $
 We need to send the following delta: [((2,2), Apple), ((4,3), Snake), ((4,4), SnakeHead)]
 -}
-step :: BoardInfo -> GameStep [Board.RenderMessage]
-step brd@BoardInfo{height, width} = do
-  st@GameState{snakeSeq = snake@SnakeSeq{snakeBody}, applePosition} <- get
+step :: GameStep [Board.RenderMessage]
+step = do
+  st@GameState{snakeSeq = snake@SnakeSeq{snakeBody}, applePosition} <- lift get
+  brd@BoardInfo{height, width} <- ask
   let head' = nextHead brd st
-  if length snakeBody == height * width - 1 || inSnake head' snake
-    then pure [Board.GameOver]
-    else
-      if head' == applePosition
-        then do
-          msg <- extendSnake head' brd
-          pure [Board.IncrementScore, Board.RenderBoard msg]
-        else do
-          msg <- displaceSnake head' brd
-          pure [Board.RenderBoard msg]
+  if
+    | length snakeBody == height * width - 2 || inSnake head' snake ->
+        pure [Board.GameOver]
+    | head' == applePosition -> do
+        msg <- extendSnake head'
+        pure [Board.IncrementScore, Board.RenderBoard msg]
+    | otherwise -> do
+        msg <- displaceSnake head'
+        pure [Board.RenderBoard msg]
 
 move :: BoardInfo -> GameState -> ([Board.RenderMessage], GameState)
-move = runState . step
+move = runState . runReaderT step
 
 seqInit :: Seq a -> Seq a
 seqInit = \case
   s :|> _ -> s
   Empty -> Empty
 
-extendSnake :: Point -> BoardInfo -> GameStep DeltaBoard
-extendSnake head' brd = do
-  GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} <- get
-  modify (\old -> old{snakeSeq = SnakeSeq head' $ snakeHead <| snakeBody})
-  applePosition' <- newApple brd
+extendSnake :: Point -> GameStep DeltaBoard
+extendSnake head' = do
+  st@GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} <- lift get
+  lift $ put st{snakeSeq = SnakeSeq head' $ snakeHead <| snakeBody}
+  applePosition' <- newApple
 
   pure
     [ (applePosition', Board.Apple)
@@ -180,10 +183,10 @@ extendSnake head' brd = do
     , (head', Board.SnakeHead)
     ]
 
-displaceSnake :: Point -> BoardInfo -> GameStep DeltaBoard
-displaceSnake head' _ = do
-  GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} <- get
-  modify (\old -> old{snakeSeq = SnakeSeq head' $ snakeHead <| seqInit snakeBody})
+displaceSnake :: Point -> GameStep DeltaBoard
+displaceSnake head' = do
+  st@GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} <- lift get
+  lift $ put st{snakeSeq = SnakeSeq head' $ snakeHead <| seqInit snakeBody}
   pure
     [ (snakeHead, Board.Snake)
     , (head', Board.SnakeHead)

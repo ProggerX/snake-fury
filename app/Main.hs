@@ -40,10 +40,10 @@ gameloop binf gstate rstate@RenderState{score} queue = do
             if movement gstate == opositeMovement m
               then move binf gstate
               else move binf $ gstate{movement = m}
-  let rstate' = updateMessages rstate delta
+  let (txt, rstate') = render delta binf rstate
       isGameOver = gameOver rstate'
   putStr "\ESC[2J" -- This cleans the console screen
-  BL.putStr $ B.toLazyByteString $ render binf rstate'
+  BL.putStr $ B.toLazyByteString txt
   unless isGameOver $ gameloop binf gstate' rstate' queue
 
 -- | main.
