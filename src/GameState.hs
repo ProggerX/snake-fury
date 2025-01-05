@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -10,22 +11,21 @@ This module defines the logic of the game and the communication with the `Board.
 module GameState where
 
 -- These are all the import. Feel free to use more if needed.
-
-import Control.Monad.Reader (Reader)
-import Control.Monad.Reader.Class (MonadReader, ask, local)
-import Control.Monad.State.Class (MonadState, get, put)
-import Control.Monad.State.Strict (state)
-import Control.Monad.Trans.Class (MonadTrans (lift))
-import Control.Monad.Trans.Reader (ReaderT (runReaderT), runReader)
-import Control.Monad.Trans.State (StateT)
-import Control.Monad.Trans.State.Strict (State, modify, runState)
-import Data.Foldable
-import Data.Maybe (isJust)
-import Data.Sequence (Seq (..), (<|))
+import Control.Monad (when)
+import Control.Monad.Reader (MonadReader, ReaderT, ask, local)
+import Control.Monad.State.Strict (MonadState, StateT, get, put)
+import Data.Foldable (toList)
+import Data.Sequence (Seq ((:|>)), (<|))
 import Data.Sequence qualified as Seq
-import RenderState (BoardInfo (..), DeltaBoard, Point)
-import RenderState qualified as Board
-import System.Random (Random (randomR), RandomGen (split), StdGen, uniformR)
+import RenderState (
+  BoardInfo (BoardInfo),
+  CellType (Apple, Empty, Snake, SnakeHead),
+  DeltaBoard,
+  Point,
+  RenderMessage (GameOver, IncrementScore, RenderBoard),
+ )
+import RenderState qualified
+import System.Random (StdGen, randomR)
 
 -- | The are two kind of events, a `ClockEvent`, representing movement which is not force by the user input, and `UserEvent` which is the opposite.
 data Event = Tick | UserEvent Movement
@@ -98,7 +98,8 @@ makeRandomPoint = do
   BoardInfo{height, width} <- ask
   zoomRandomGen $ randomR ((1, 1), (height, width))
 
-zoomRandomGen :: (MonadState s m, HasGameState s, MonadReader BoardInfo m) => (StdGen -> (a, StdGen)) -> m a
+zoomRandomGen ::
+  (MonadState s m, HasGameState s) => (StdGen -> (a, StdGen)) -> m a
 zoomRandomGen f = do
   as <- get
   let st = getGameState as
@@ -188,38 +189,41 @@ Another example, if we move between this two steps
        - 0 $ X          - 0 0 $
 We need to send the following delta: [((2,2), Apple), ((4,3), Snake), ((4,4), SnakeHead)]
 -}
-step :: (MonadState s m, HasGameState s, MonadReader BoardInfo m) => m [Board.RenderMessage]
+step ::
+  (MonadState s m, HasGameState s, MonadReader BoardInfo m) => m [RenderMessage]
 step = do
   st@GameState{snakeSeq = snake@SnakeSeq{snakeBody}, applePosition} <- getGameState <$> get
   brd@BoardInfo{height, width} <- ask
   let head' = nextHead brd st
   if
     | length snakeBody == height * width - 2 || inSnake head' snake ->
-        pure [Board.GameOver]
+        pure [GameOver]
     | head' == applePosition -> do
         msg <- extendSnake head'
-        pure [Board.IncrementScore, Board.RenderBoard msg]
+        pure [IncrementScore, RenderBoard msg]
     | otherwise -> do
         msg <- displaceSnake head'
-        pure [Board.RenderBoard msg]
+        pure [RenderBoard msg]
 
-move :: (MonadReader BoardInfo m, MonadState state m, HasGameState state) => Event -> m [Board.RenderMessage]
+move ::
+  (MonadReader BoardInfo m, MonadState state m, HasGameState state) =>
+  Event ->
+  m [RenderMessage]
 move event = do
   as <- get
   let gstate = getGameState as
   case event of
-    Tick -> step
-    UserEvent movement ->
-      if gstate.movement == oppositeMovement movement
-        then step
-        else do
-          put $ setGameState as gstate{movement}
-          step
+    Tick -> pure ()
+    UserEvent movement -> do
+      when (gstate.movement /= oppositeMovement movement) $
+        put $
+          setGameState as gstate{movement}
+  step
 
 seqInit :: Seq a -> Seq a
 seqInit = \case
   s :|> _ -> s
-  Empty -> Empty
+  Seq.Empty -> Seq.Empty
 
 extendSnake :: Point -> (MonadState s m, HasGameState s, MonadReader BoardInfo m) => m DeltaBoard
 extendSnake head' = do
@@ -227,11 +231,10 @@ extendSnake head' = do
   let st@GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} = getGameState as
   put $ setGameState as st{snakeSeq = SnakeSeq head' $ snakeHead <| snakeBody}
   applePosition' <- newApple
-
   pure
-    [ (applePosition', Board.Apple)
-    , (snakeHead, Board.Snake)
-    , (head', Board.SnakeHead)
+    [ (applePosition', Apple)
+    , (snakeHead, Snake)
+    , (head', SnakeHead)
     ]
 
 displaceSnake :: Point -> (MonadState s m, HasGameState s, MonadReader BoardInfo m) => m DeltaBoard
@@ -240,7 +243,7 @@ displaceSnake head' = do
   let st@GameState{snakeSeq = SnakeSeq{snakeHead, snakeBody}} = getGameState as
   put $ setGameState as st{snakeSeq = SnakeSeq head' $ snakeHead <| seqInit snakeBody}
   pure
-    [ (snakeHead, Board.Snake)
-    , (head', Board.SnakeHead)
-    , (snakeBody `Seq.index` (length snakeBody - 1), Board.Empty)
+    [ (snakeHead, Snake)
+    , (head', SnakeHead)
+    , (snakeBody `Seq.index` (length snakeBody - 1), Empty)
     ]

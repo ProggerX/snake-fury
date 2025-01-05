@@ -1,24 +1,40 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module App where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless)
-import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
-import Control.Monad.State (MonadState (get), StateT (runStateT), evalStateT, gets)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
+import Control.Monad.State (MonadState, StateT, evalStateT, gets)
 import EventQueue (EventQueue, readEvent, setSpeed)
-import GameState (GameState, HasGameState (getGameState, setGameState), move)
-import RenderState (BoardInfo, HasRenderState (getRenderState, setRenderState), RenderState (score), gameOver, render)
+import GameState (GameState, HasGameState, move)
+import GameState qualified
+import RenderState (
+  BoardInfo,
+  HasRenderState,
+  RenderState,
+  gameOver,
+  getRenderState,
+  render,
+  score,
+ )
+import RenderState qualified
 
 -- This is the new state, which glue together Game and Render states.
 data AppState = AppState GameState RenderState
 
 -- Our application is a readerT with and AppState and IO capabilities.
 newtype App m a = App {runApp :: ReaderT BoardInfo (StateT AppState m) a}
-  deriving (Functor, Applicative, Monad, MonadState AppState, MonadReader BoardInfo, MonadIO)
+  deriving
+    ( Applicative
+    , Functor
+    , Monad
+    , MonadIO
+    , MonadReader BoardInfo
+    , MonadState AppState
+    )
 
 -- We need to make AppState and instance of HasGameState so we can use it with functions from `GameState.hs`
 instance HasGameState AppState where

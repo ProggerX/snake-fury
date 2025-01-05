@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -23,16 +22,13 @@ module RenderState where
 -- This are all imports you need. Feel free to import more things.
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader.Class (MonadReader, ask)
-import Control.Monad.State.Class (MonadState, get, put)
-import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Reader (ReaderT (runReaderT))
-import Control.Monad.Trans.State (StateT)
+import Control.Monad.Reader (MonadReader, ReaderT, ask)
+import Control.Monad.State.Strict (MonadState, StateT, get, put)
 import Data.Array (Array, assocs, listArray, (//))
 import Data.ByteString.Builder (Builder)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Lazy qualified as BL
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', traverse_)
 
 -- A point is just a tuple of integers.
 type Point = (Int, Int)
@@ -104,7 +100,7 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
 -- >>> buildInitialBoard (BoardInfo 2 2) (1,1) (2,2)
 
 -- | Given tye current render state, and a message -> update the render state
-updateRenderState :: (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => RenderMessage -> m ()
+updateRenderState :: (MonadState s m, HasRenderState s) => RenderMessage -> m ()
 updateRenderState GameOver = do
   as <- get
   let st = getRenderState as
@@ -118,8 +114,8 @@ updateRenderState (RenderBoard delta) = do
   let st@RenderState{board} = getRenderState as
   put $ setRenderState as st{board = board // delta}
 
-updateMessages :: (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => [RenderMessage] -> m ()
-updateMessages = mapM_ updateRenderState
+updateMessages :: (MonadState s m, HasRenderState s) => [RenderMessage] -> m ()
+updateMessages = traverse_ updateRenderState
 
 {-
 This is a test for updateRenderState
