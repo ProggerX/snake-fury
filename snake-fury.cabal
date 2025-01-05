@@ -19,6 +19,7 @@ source-repository head
 
 library
   exposed-modules:
+      App
       EventQueue
       RenderState
       GameState

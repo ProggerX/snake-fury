@@ -2,49 +2,16 @@
 
 module Main where
 
+import App (AppState (AppState), run)
 import Control.Concurrent (
   forkIO,
-  threadDelay,
  )
-import Control.Monad (unless)
-import Data.ByteString.Builder qualified as B
-import Data.ByteString.Lazy qualified as BL
 import EventQueue (
-  Event (Tick, UserEvent),
-  EventQueue,
-  readEvent,
-  setSpeed,
   writeUserInput,
  )
-import GameState (GameState (movement), move, opositeMovement)
 import Initialization (gameInitialization)
-import RenderState (BoardInfo, RenderState (RenderState, gameOver, score), render, updateMessages)
 import System.Environment (getArgs)
 import System.IO (BufferMode (NoBuffering), hSetBinaryMode, hSetBuffering, hSetEcho, stdin, stdout)
-
--- The game loop is easy:
---   - wait some time
---   - read an Event from the queue
---   - Update the GameState
---   - Update the RenderState based on message delivered by GameState update
---   - Render into the console
-gameloop :: BoardInfo -> GameState -> RenderState -> EventQueue -> IO ()
-gameloop binf gstate rstate@RenderState{score} queue = do
-  speed <- setSpeed score queue
-  threadDelay speed
-  event <- readEvent queue
-  let (delta, gstate') =
-        case event of
-          Tick -> move binf gstate
-          UserEvent m ->
-            if movement gstate == opositeMovement m
-              then move binf gstate
-              else move binf $ gstate{movement = m}
-  let (txt, rstate') = render delta binf rstate
-      isGameOver = gameOver rstate'
-  putStr "\ESC[2J" -- This cleans the console screen
-  BL.putStr $ B.toLazyByteString txt
-  unless isGameOver $ gameloop binf gstate' rstate' queue
 
 -- | main.
 main :: IO ()
@@ -63,5 +30,5 @@ main = do
 
   -- Game Loop. We run two different threads, one for the gameloop (main) and one for user inputs.
   _ <- forkIO $ writeUserInput eventQueue
-  let initialState = gameState
-  gameloop binf initialState renderState eventQueue
+  let initialState = AppState gameState renderState
+  run binf initialState eventQueue

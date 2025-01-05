@@ -22,12 +22,16 @@ module RenderState where
 
 -- This are all imports you need. Feel free to import more things.
 
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader.Class (MonadReader, ask)
+import Control.Monad.State.Class (MonadState, get, put)
 import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Reader (ReaderT (runReaderT), ask, asks)
-import Control.Monad.Trans.State.Strict (State, evalState, get, modify, put, runState)
+import Control.Monad.Trans.Reader (ReaderT (runReaderT))
+import Control.Monad.Trans.State (StateT)
 import Data.Array (Array, assocs, listArray, (//))
 import Data.ByteString.Builder (Builder)
 import Data.ByteString.Builder qualified as B
+import Data.ByteString.Lazy qualified as BL
 import Data.Foldable (foldl')
 
 -- A point is just a tuple of integers.
@@ -57,7 +61,18 @@ data RenderMessage = RenderBoard DeltaBoard | IncrementScore | GameOver deriving
 -- | The RenderState contains the board and if the game is over or not.
 data RenderState = RenderState {board :: Board, gameOver :: Bool, score :: Int} deriving (Show)
 
-type RenderStep a = ReaderT BoardInfo (State RenderState) a
+newtype RenderStep m a = RenderStep {runRenderStep :: ReaderT BoardInfo (StateT RenderState m) a}
+  deriving
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadState RenderState
+    , MonadReader BoardInfo
+    )
+
+class HasRenderState state where
+  getRenderState :: state -> RenderState
+  setRenderState :: state -> RenderState -> state
 
 -- | Given The board info, this function should return a board with all Empty cells
 emptyGrid :: BoardInfo -> Board
@@ -89,12 +104,21 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
 -- >>> buildInitialBoard (BoardInfo 2 2) (1,1) (2,2)
 
 -- | Given tye current render state, and a message -> update the render state
-updateRenderState :: RenderMessage -> RenderStep ()
-updateRenderState GameOver = lift $ modify (\st -> st{gameOver = True})
-updateRenderState IncrementScore = lift $ modify (\st@RenderState{score} -> st{score = score + 10})
-updateRenderState (RenderBoard delta) = lift $ modify (\st@RenderState{board} -> st{board = board // delta})
+updateRenderState :: (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => RenderMessage -> m ()
+updateRenderState GameOver = do
+  as <- get
+  let st = getRenderState as
+  put $ setRenderState as st{gameOver = True}
+updateRenderState IncrementScore = do
+  as <- get
+  let st@RenderState{score} = getRenderState as
+  put $ setRenderState as st{score = score + 10}
+updateRenderState (RenderBoard delta) = do
+  as <- get
+  let st@RenderState{board} = getRenderState as
+  put $ setRenderState as st{board = board // delta}
 
-updateMessages :: [RenderMessage] -> RenderStep ()
+updateMessages :: (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => [RenderMessage] -> m ()
 updateMessages = mapM_ updateRenderState
 
 {-
@@ -140,10 +164,10 @@ ppScore s =
 {- | convert the RenderState in a String ready to be flushed into the console.
   It should return the Board with a pretty look. If game over, return the empty board.
 -}
-renderStep :: [RenderMessage] -> RenderStep Builder
+renderStep :: [RenderMessage] -> (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => m Builder
 renderStep msgs = do
   updateMessages msgs
-  RenderState{gameOver, score, board} <- lift get
+  RenderState{gameOver, score, board} <- getRenderState <$> get
   BoardInfo{width} <- ask
   if gameOver
     then pure "Game Over!"
@@ -154,8 +178,11 @@ renderStep msgs = do
           , foldl' (\old ((_, x), c) -> mconcat [old, ppCell c, if x == width then "\n" else ""]) "" (assocs board)
           ]
 
-render :: [RenderMessage] -> BoardInfo -> RenderState -> (Builder, RenderState)
-render msgs = runState . runReaderT (renderStep msgs)
+render :: (MonadReader BoardInfo m, MonadState state m, HasRenderState state, MonadIO m) => [RenderMessage] -> m ()
+render msgs = do
+  txt <- renderStep msgs
+  liftIO $ putStr "\ESC[2J"
+  liftIO $ BL.putStr $ B.toLazyByteString txt
 
 {-
 This is a test for render. It should return:
