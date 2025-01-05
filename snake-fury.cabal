@@ -37,7 +37,6 @@ library
     , array
     , bytestring
     , containers
-    , transformers
     , mtl
     , random
   default-language: GHC2021
@@ -54,6 +53,5 @@ executable snake-fury
   build-depends:
       base
     , snake-fury
-    , bytestring
   default-language: GHC2021
 

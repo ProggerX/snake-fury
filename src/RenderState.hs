@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -23,16 +22,15 @@ module RenderState where
 -- This are all imports you need. Feel free to import more things.
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader.Class (MonadReader, ask)
+import Control.Monad.Reader (ReaderT)
+import Control.Monad.Reader.Class (MonadReader, asks)
+import Control.Monad.State (StateT)
 import Control.Monad.State.Class (MonadState, get, put)
-import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Reader (ReaderT (runReaderT))
-import Control.Monad.Trans.State (StateT)
 import Data.Array (Array, assocs, listArray, (//))
 import Data.ByteString.Builder (Builder)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Lazy qualified as BL
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', traverse_)
 
 -- A point is just a tuple of integers.
 type Point = (Int, Int)
@@ -74,6 +72,9 @@ class HasRenderState state where
   getRenderState :: state -> RenderState
   setRenderState :: state -> RenderState -> state
 
+class HasBoardInfo env where
+  getBoardInfo :: env -> BoardInfo
+
 -- | Given The board info, this function should return a board with all Empty cells
 emptyGrid :: BoardInfo -> Board
 emptyGrid BoardInfo{height, width} = listArray ((1, 1), (height, width)) (replicate (height * width) Empty)
@@ -95,7 +96,7 @@ buildInitialBoard ::
   RenderState
 buildInitialBoard brd snake apple = RenderState{board = brd', gameOver = False, score = 0}
  where
-  brd' = emptyGrid brd // [(snake, SnakeHead), (apple, Apple), ((fst snake, snd snake - 1), Snake)]
+  brd' = emptyGrid brd // [(snake, SnakeHead), (apple, Apple), ((fst snake, snd snake + 1), Snake)]
 
 {-
 This is a test for buildInitialBoard. It should return
@@ -104,7 +105,7 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
 -- >>> buildInitialBoard (BoardInfo 2 2) (1,1) (2,2)
 
 -- | Given tye current render state, and a message -> update the render state
-updateRenderState :: (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => RenderMessage -> m ()
+updateRenderState :: (MonadState s m, HasRenderState s) => RenderMessage -> m ()
 updateRenderState GameOver = do
   as <- get
   let st = getRenderState as
@@ -118,8 +119,8 @@ updateRenderState (RenderBoard delta) = do
   let st@RenderState{board} = getRenderState as
   put $ setRenderState as st{board = board // delta}
 
-updateMessages :: (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => [RenderMessage] -> m ()
-updateMessages = mapM_ updateRenderState
+updateMessages :: (MonadState s m, HasRenderState s) => [RenderMessage] -> m ()
+updateMessages = traverse_ updateRenderState
 
 {-
 This is a test for updateRenderState
@@ -164,11 +165,10 @@ ppScore s =
 {- | convert the RenderState in a String ready to be flushed into the console.
   It should return the Board with a pretty look. If game over, return the empty board.
 -}
-renderStep :: [RenderMessage] -> (MonadState s m, HasRenderState s, MonadReader BoardInfo m) => m Builder
-renderStep msgs = do
-  updateMessages msgs
+renderStep :: (MonadState s m, HasRenderState s, MonadReader env m, HasBoardInfo env) => m Builder
+renderStep = do
   RenderState{gameOver, score, board} <- getRenderState <$> get
-  BoardInfo{width} <- ask
+  BoardInfo{width} <- asks getBoardInfo
   if gameOver
     then pure "Game Over!"
     else
@@ -178,9 +178,9 @@ renderStep msgs = do
           , foldl' (\old ((_, x), c) -> mconcat [old, ppCell c, if x == width then "\n" else ""]) "" (assocs board)
           ]
 
-render :: (MonadReader BoardInfo m, MonadState state m, HasRenderState state, MonadIO m) => [RenderMessage] -> m ()
-render msgs = do
-  txt <- renderStep msgs
+render :: (MonadReader env m, HasBoardInfo env, MonadState state m, HasRenderState state, MonadIO m) => m ()
+render = do
+  txt <- renderStep
   liftIO $ putStr "\ESC[2J"
   liftIO $ BL.putStr $ B.toLazyByteString txt
 

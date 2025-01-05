@@ -16,9 +16,11 @@ getRandomPoint h w = (,) <$> randomRIO (1, h) <*> randomRIO (1, w)
 inititalizePoints :: Int -> Int -> IO (RenderState.Point, RenderState.Point)
 inititalizePoints h w = do
   (snakeInit, appleInit) <- (,) <$> getRandomPoint h (w - 1) <*> getRandomPoint h w
-  if snakeInit == appleInit
+  if snakeInit == appleInit || appleInit == snakeBodyInit snakeInit
     then inititalizePoints h w
     else return (snakeInit, appleInit)
+ where
+  snakeBodyInit snakeInit = (fst snakeInit, snd snakeInit - 1)
 
 -- | given the initial parameters height, width and initial time, It creates the initial state, the initial render state and the event queue
 gameInitialization :: Int -> Int -> Int -> IO (RenderState.BoardInfo, Snake.GameState, RenderState.RenderState, EventQueue)
@@ -28,7 +30,7 @@ gameInitialization hight width initialspeed = do
   newUserEventQueue <- newBoundedChan 3
   newSpeed <- newMVar initialspeed
   let binf = RenderState.BoardInfo hight width
-      gameState = Snake.GameState (Snake.SnakeSeq snakeInit $ Seq.fromList [(fst snakeInit, snd snakeInit - 1)]) appleInit Snake.East sg
+      gameState = Snake.GameState (Snake.SnakeSeq snakeInit $ Seq.fromList [(fst snakeInit, snd snakeInit + 1)]) appleInit Snake.West sg
       renderState = RenderState.buildInitialBoard binf snakeInit appleInit
       eventQueue = EventQueue newUserEventQueue newSpeed initialspeed
   return (binf, gameState, renderState, eventQueue)

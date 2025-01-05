@@ -32,6 +32,9 @@ data EventQueue = EventQueue
   -- ^ The initial speed
   }
 
+class HasEventQueue env where
+  getEventQueue :: env -> EventQueue
+
 {- | Given the current score and the initial speed, calculates the new speed.
   The speed is increased by 10% every 10 points, up to 50 points.
 -}
