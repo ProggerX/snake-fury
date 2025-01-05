@@ -37,6 +37,8 @@ library
     , array
     , bytestring
     , containers
+    , generic-lens
+    , lens
     , mtl
     , random
   default-language: GHC2021

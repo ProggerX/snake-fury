@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {- |
@@ -21,16 +22,17 @@ module RenderState where
 
 -- This are all imports you need. Feel free to import more things.
 
+import Control.Lens (Lens', use, (%=), (&), (+=), (+~), (.=), _2)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (ReaderT)
-import Control.Monad.Reader.Class (MonadReader, asks)
-import Control.Monad.State (StateT)
-import Control.Monad.State.Class (MonadState, get, put)
+import Control.Monad.Reader (MonadReader, ReaderT, asks)
+import Control.Monad.State.Strict (MonadState, StateT)
 import Data.Array (Array, assocs, listArray, (//))
 import Data.ByteString.Builder (Builder)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Lazy qualified as BL
 import Data.Foldable (foldl', traverse_)
+import Data.Generics.Labels ()
+import GHC.Generics (Generic)
 
 -- A point is just a tuple of integers.
 type Point = (Int, Int)
@@ -57,7 +59,7 @@ type DeltaBoard = [(Point, CellType)]
 data RenderMessage = RenderBoard DeltaBoard | IncrementScore | GameOver deriving (Show)
 
 -- | The RenderState contains the board and if the game is over or not.
-data RenderState = RenderState {board :: Board, gameOver :: Bool, score :: Int} deriving (Show)
+data RenderState = RenderState {board :: Board, gameOver :: Bool, score :: Int} deriving (Generic, Show)
 
 newtype RenderStep m a = RenderStep {runRenderStep :: ReaderT BoardInfo (StateT RenderState m) a}
   deriving
@@ -69,8 +71,7 @@ newtype RenderStep m a = RenderStep {runRenderStep :: ReaderT BoardInfo (StateT 
     )
 
 class HasRenderState state where
-  getRenderState :: state -> RenderState
-  setRenderState :: state -> RenderState -> state
+  renderState :: Lens' state RenderState
 
 class HasBoardInfo env where
   getBoardInfo :: env -> BoardInfo
@@ -94,9 +95,12 @@ buildInitialBoard ::
   -- | initial Point of the apple
   Point ->
   RenderState
-buildInitialBoard brd snake apple = RenderState{board = brd', gameOver = False, score = 0}
+buildInitialBoard brd snake apple =
+  RenderState{board = brd', gameOver = False, score = 0}
  where
-  brd' = emptyGrid brd // [(snake, SnakeHead), (apple, Apple), ((fst snake, snd snake + 1), Snake)]
+  brd' =
+    emptyGrid brd
+      // [(snake, SnakeHead), (apple, Apple), (snake & _2 +~ 1, Snake)]
 
 {-
 This is a test for buildInitialBoard. It should return
@@ -106,18 +110,10 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
 
 -- | Given tye current render state, and a message -> update the render state
 updateRenderState :: (MonadState s m, HasRenderState s) => RenderMessage -> m ()
-updateRenderState GameOver = do
-  as <- get
-  let st = getRenderState as
-  put $ setRenderState as st{gameOver = True}
-updateRenderState IncrementScore = do
-  as <- get
-  let st@RenderState{score} = getRenderState as
-  put $ setRenderState as st{score = score + 10}
-updateRenderState (RenderBoard delta) = do
-  as <- get
-  let st@RenderState{board} = getRenderState as
-  put $ setRenderState as st{board = board // delta}
+updateRenderState = \case
+  GameOver -> renderState . #gameOver .= True
+  IncrementScore -> renderState . #score += 10
+  RenderBoard delta -> renderState . #board %= (// delta)
 
 updateMessages :: (MonadState s m, HasRenderState s) => [RenderMessage] -> m ()
 updateMessages = traverse_ updateRenderState
@@ -167,7 +163,7 @@ ppScore s =
 -}
 renderStep :: (MonadState s m, HasRenderState s, MonadReader env m, HasBoardInfo env) => m Builder
 renderStep = do
-  RenderState{gameOver, score, board} <- getRenderState <$> get
+  RenderState{gameOver, score, board} <- use renderState
   BoardInfo{width} <- asks getBoardInfo
   if gameOver
     then pure "Game Over!"
