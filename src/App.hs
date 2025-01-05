@@ -1,28 +1,36 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedLabels #-}
 
 module App where
 
 import Control.Concurrent (threadDelay)
+import Control.Lens (use)
 import Control.Monad (unless)
-import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), asks)
-import Control.Monad.State (MonadState, StateT, evalStateT, gets)
+import Control.Monad.State (MonadState, StateT, evalStateT)
+import Data.Generics.Product (typed)
 import EventQueue (EventQueue, HasEventQueue (..), readEvent, setSpeed)
+import GHC.Generics (Generic)
 import GameState (Event (..), GameState, HasGameState (..), move)
 import RenderState (
   BoardInfo,
-  HasBoardInfo (..),
-  HasRenderState (..),
+  HasBoardInfo,
+  HasRenderState,
   RenderMessage,
-  RenderState (score),
-  gameOver,
+  RenderState,
   render,
+  renderState,
   updateMessages,
  )
+import RenderState qualified
 
 data AppState = AppState GameState RenderState
+  deriving (Generic)
+
 data Env = Env BoardInfo EventQueue
+
 newtype App m a = App {runApp :: ReaderT Env (StateT AppState m) a}
   deriving
     ( Functor
@@ -35,13 +43,11 @@ newtype App m a = App {runApp :: ReaderT Env (StateT AppState m) a}
 
 -- We need to make AppState and instance of HasGameState so we can use it with functions from `GameState.hs`
 instance HasGameState AppState where
-  getGameState (AppState gs _) = gs
-  setGameState (AppState _ rs) gs' = AppState gs' rs
+  gameState = typed @GameState
 
 -- We need to make AppState and instance of HasRenderState so we can use it with functions from `RenderState.hs`
 instance HasRenderState AppState where
-  getRenderState (AppState _ rs) = rs
-  setRenderState (AppState gs _) = AppState gs
+  renderState = typed @RenderState
 
 instance HasBoardInfo Env where
   getBoardInfo (Env brd _) = brd
@@ -75,7 +81,7 @@ instance (MonadIO m) => MonadRender (App m) where
 setSpeedOnScore :: (MonadReader env m, HasEventQueue env, MonadState state m, HasRenderState state, MonadIO m) => m Int
 setSpeedOnScore = do
   queue <- asks getEventQueue
-  s <- gets (score . getRenderState)
+  s <- use $ renderState . #score
   liftIO $ setSpeed s queue
 
 -- This is one step of the logic: read from the queue and-then update the game state and-then update the render state and-then render
@@ -88,9 +94,9 @@ gameloop = do
   w <- setSpeedOnScore
   liftIO $ threadDelay w
   gameStep
-  isGameOver <- gets (gameOver . getRenderState)
+  isGameOver <- use $ renderState . #gameOver
   unless isGameOver gameloop
 
 -- Run the application as usual
 run :: Env -> AppState -> IO ()
-run env app = runApp gameloop `runReaderT` env `evalStateT` app
+run env app = (`evalStateT` app) $ (`runReaderT` env) $ runApp gameloop
