@@ -15,9 +15,7 @@ module GameState where
 
 import Control.Lens (use, (.=))
 import Control.Monad (when)
-import Control.Monad.RWS.Strict (RWST)
-import Control.Monad.Reader (ask)
-import Control.Monad.State.Strict (get, state)
+import Control.Monad.RWS.Strict (RWST, ask, get, state)
 import Data.Foldable (toList)
 import Data.Sequence (Seq ((:|>)), (<|))
 import Data.Sequence qualified as Seq
@@ -71,7 +69,7 @@ oppositeMovement = \case
   You should take a look to System.Random documentation.
   Also, in the import list you have all relevant functions.
 -}
-makeRandomPoint :: Monad m => GameStep m Point
+makeRandomPoint :: (Monad m) => GameStep m Point
 makeRandomPoint = do
   BoardInfo{height, width} <- ask
   state $ #randomGen $ randomR ((1, 1), (height, width))
@@ -129,7 +127,7 @@ True
 -- >>> nextHead board_info game_state3 == (4,1)
 
 -- | Calculates a new random apple, avoiding creating the apple in the same place, or in the snake body
-newApple :: Monad m => GameStep m Point
+newApple :: (Monad m) => GameStep m Point
 newApple = do
   pt <- makeRandomPoint
   GameState{snakeSeq, applePosition} <- get
@@ -157,7 +155,7 @@ Another example, if we move between this two steps
        - 0 $ X          - 0 0 $
 We need to send the following delta: [((2,2), Apple), ((4,3), Snake), ((4,4), SnakeHead)]
 -}
-step :: Monad m => GameStep m [RenderMessage]
+step :: (Monad m) => GameStep m [RenderMessage]
 step = do
   st@GameState{snakeSeq = snake@SnakeSeq{snakeBody}, applePosition} <- get
   brd@BoardInfo{height, width} <- ask
@@ -172,7 +170,7 @@ step = do
         msg <- displaceSnake head'
         pure [RenderBoard msg]
 
-move :: Monad m => Event -> GameStep m [RenderMessage]
+move :: (Monad m) => Event -> GameStep m [RenderMessage]
 move event = do
   currentMovement <- use #movement
   case event of
@@ -187,7 +185,7 @@ seqInit = \case
   s :|> _ -> s
   Seq.Empty -> Seq.Empty
 
-extendSnake :: Monad m => Point -> GameStep m DeltaBoard
+extendSnake :: (Monad m) => Point -> GameStep m DeltaBoard
 extendSnake head' = do
   SnakeSeq{snakeHead, snakeBody} <- use #snakeSeq
   #snakeSeq .= SnakeSeq head' (snakeHead <| snakeBody)
@@ -198,7 +196,7 @@ extendSnake head' = do
     , (head', SnakeHead)
     ]
 
-displaceSnake :: Monad m => Point -> GameStep m DeltaBoard
+displaceSnake :: (Monad m) => Point -> GameStep m DeltaBoard
 displaceSnake head' = do
   SnakeSeq{snakeHead, snakeBody} <- use #snakeSeq
   #snakeSeq .= SnakeSeq head' (snakeHead <| seqInit snakeBody)

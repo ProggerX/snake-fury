@@ -23,17 +23,15 @@ module RenderState where
 
 -- This are all imports you need. Feel free to import more things.
 
-import Control.Lens (use, view, (%=), (&), (+=), (+~), (.=), _2)
+import Control.Lens ((%=), (&), (+=), (+~), (.=), _2)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (MonadReader, ReaderT)
-import Control.Monad.State.Strict (MonadState, StateT)
+import Control.Monad.RWS.Strict (RWST, ask, get)
 import Data.Array (Array, assocs, listArray, (//))
 import Data.ByteString.Builder (Builder)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Lazy qualified as BL
 import Data.Foldable (foldl', traverse_)
 import Data.Generics.Labels ()
-import Data.Generics.Product (HasField, HasField')
 import GHC.Generics (Generic)
 
 -- A point is just a tuple of integers.
@@ -63,21 +61,7 @@ data RenderMessage = RenderBoard DeltaBoard | IncrementScore | GameOver deriving
 -- | The RenderState contains the board and if the game is over or not.
 data RenderState = RenderState {board :: Board, gameOver :: Bool, score :: Int} deriving (Generic, Show)
 
-newtype RenderStep m a = RenderStep {runRenderStep :: ReaderT BoardInfo (StateT RenderState m) a}
-  deriving
-    ( Functor
-    , Applicative
-    , Monad
-    , MonadState RenderState
-    , MonadReader BoardInfo
-    )
-
-type HasRenderState s =
-  ( HasField "renderState" s s RenderState RenderState
-  , HasField' "renderState" s RenderState
-  )
-
-type HasBoardInfo env = HasField' "boardInfo" env BoardInfo
+type RenderStep = RWST BoardInfo () RenderState
 
 -- | Given The board info, this function should return a board with all Empty cells
 emptyGrid :: BoardInfo -> Board
@@ -112,13 +96,13 @@ RenderState {board = array ((1,1),(2,2)) [((1,1),SnakeHead),((1,2),Empty),((2,1)
 -- >>> buildInitialBoard (BoardInfo 2 2) (1,1) (2,2)
 
 -- | Given tye current render state, and a message -> update the render state
-updateRenderState :: (MonadState s m, HasRenderState s) => RenderMessage -> m ()
+updateRenderState :: (Monad m) => RenderMessage -> RenderStep m ()
 updateRenderState = \case
-  GameOver -> #renderState . #gameOver .= True
-  IncrementScore -> #renderState . #score += 10
-  RenderBoard delta -> #renderState . #board %= (// delta)
+  GameOver -> #gameOver .= True
+  IncrementScore -> #score += 10
+  RenderBoard delta -> #board %= (// delta)
 
-updateMessages :: (MonadState s m, HasRenderState s) => [RenderMessage] -> m ()
+updateMessages :: (Monad m) => [RenderMessage] -> RenderStep m ()
 updateMessages = traverse_ updateRenderState
 
 {-
@@ -164,10 +148,10 @@ ppScore s =
 {- | convert the RenderState in a String ready to be flushed into the console.
   It should return the Board with a pretty look. If game over, return the empty board.
 -}
-renderStep :: (MonadState s m, HasRenderState s, MonadReader env m, HasBoardInfo env) => m Builder
+renderStep :: (Monad m) => RenderStep m Builder
 renderStep = do
-  RenderState{gameOver, score, board} <- use #renderState
-  BoardInfo{width} <- view #boardInfo
+  BoardInfo{width} <- ask
+  RenderState{gameOver, score, board} <- get
   if gameOver
     then pure "Game Over!"
     else
@@ -177,7 +161,7 @@ renderStep = do
           , foldl' (\old ((_, x), c) -> mconcat [old, ppCell c, if x == width then "\n" else ""]) "" (assocs board)
           ]
 
-render :: (MonadReader env m, HasBoardInfo env, MonadState state m, HasRenderState state, MonadIO m) => m ()
+render :: (MonadIO m) => RenderStep m ()
 render = do
   txt <- renderStep
   liftIO $ putStr "\ESC[2J"

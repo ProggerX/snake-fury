@@ -10,12 +10,11 @@ import Control.Lens (magnify, use, view, zoom)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.RWS.Strict (MonadReader, MonadState, RWST, evalRWST)
-import EventQueue (EventQueue, HasEventQueue, readEvent, setSpeed)
+import EventQueue (EventQueue, readEvent, setSpeed)
 import GHC.Generics (Generic)
 import GameState (Event (..), GameState, move)
 import RenderState (
   BoardInfo,
-  HasRenderState,
   RenderMessage,
   RenderState,
   render,
@@ -50,19 +49,15 @@ instance MonadQueue App where
   pullEvent = App $ view #eventQueue >>= liftIO . readEvent
 
 instance MonadSnake App where
-  updateGameState event =
-    App $ zoom #gameState $ magnify #boardInfo $ move event
-
-  --  where
-  --   zoom l = state . l . runState
-
-  updateRenderState = updateMessages
+  updateGameState = App . magnify #boardInfo . zoom #gameState . move
+  updateRenderState =
+    App . magnify #boardInfo . zoom #renderState . updateMessages
 
 instance MonadRender App where
-  render = RenderState.render
+  render = App $ magnify #boardInfo $ zoom #renderState RenderState.render
 
 -- This set the the speed of the game on the score. Notice the constraint give access to all the components.
-setSpeedOnScore :: (MonadReader env m, HasEventQueue env, MonadState state m, HasRenderState state, MonadIO m) => m Int
+setSpeedOnScore :: App Int
 setSpeedOnScore = do
   queue <- view #eventQueue
   s <- use $ #renderState . #score
@@ -73,7 +68,7 @@ gameStep :: (MonadQueue m, MonadSnake m, MonadRender m) => m ()
 gameStep = pullEvent >>= updateGameState >>= updateRenderState >>= pure App.render
 
 -- The game loop implementation is provided. To pretty much can read in english.
-gameloop :: (MonadQueue m, MonadSnake m, MonadRender m, MonadState state m, HasRenderState state, MonadReader env m, HasEventQueue env, MonadIO m) => m ()
+gameloop :: App ()
 gameloop = do
   w <- setSpeedOnScore
   liftIO $ threadDelay w
