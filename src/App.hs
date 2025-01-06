@@ -6,20 +6,13 @@
 module App where
 
 import Control.Concurrent (threadDelay)
-import Control.Lens (use, view)
+import Control.Lens (magnify, use, view, zoom)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
-import Control.Monad.State.Strict (
-  MonadState,
-  StateT,
-  evalStateT,
-  runState,
-  state,
- )
+import Control.Monad.RWS.Strict (MonadReader, MonadState, RWST, evalRWST)
 import EventQueue (EventQueue, HasEventQueue, readEvent, setSpeed)
 import GHC.Generics (Generic)
-import GameState (Event (..), GameState, move, runGameStep)
+import GameState (Event (..), GameState, move)
 import RenderState (
   BoardInfo,
   HasRenderState,
@@ -35,13 +28,12 @@ data AppState = AppState {gameState :: GameState, renderState :: RenderState}
 data Env = Env {boardInfo :: BoardInfo, eventQueue :: EventQueue}
   deriving (Generic)
 
-newtype App a = App (ReaderT Env (StateT AppState IO) a)
+newtype App a = App (RWST Env () AppState IO a)
   deriving
     (Applicative, Functor, Monad, MonadIO, MonadState AppState, MonadReader Env)
 
 runApp :: Env -> AppState -> App a -> IO a
-runApp env initialState (App app) =
-  (`evalStateT` initialState) $ (`runReaderT` env) app
+runApp env initialState (App app) = fst <$> evalRWST app env initialState
 
 class (Monad m) => MonadQueue m where
   -- | Pull an Event from the queue
@@ -58,11 +50,11 @@ instance MonadQueue App where
   pullEvent = App $ view #eventQueue >>= liftIO . readEvent
 
 instance MonadSnake App where
-  updateGameState event = do
-    Env{boardInfo} <- ask
-    zoom #gameState $ runGameStep boardInfo $ move event
-   where
-    zoom l = state . l . runState
+  updateGameState event =
+    App $ zoom #gameState $ magnify #boardInfo $ move event
+
+  --  where
+  --   zoom l = state . l . runState
 
   updateRenderState = updateMessages
 
