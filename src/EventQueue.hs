@@ -8,7 +8,6 @@ module EventQueue where
 
 import Control.Concurrent (MVar, readMVar, swapMVar)
 import Control.Concurrent.BoundedChan (BoundedChan, tryReadChan, tryWriteChan)
-import Data.Generics.Product (HasField')
 import GameState (Event (..))
 import GameState qualified as Snake
 import System.IO (hReady, stdin)
@@ -25,8 +24,6 @@ data EventQueue = EventQueue
   , initialSpeed :: Int
   -- ^ The initial speed
   }
-
-type HasEventQueue env = HasField' "eventQueue" env EventQueue
 
 {- | Given the current score and the initial speed, calculates the new speed.
   The speed is increased by 10% every 10 points, up to 50 points.
