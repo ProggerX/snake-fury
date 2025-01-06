@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -8,11 +9,17 @@ import Control.Concurrent (threadDelay)
 import Control.Lens (use, view)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (MonadReader, ReaderT (runReaderT))
-import Control.Monad.State (MonadState, StateT, evalStateT)
+import Control.Monad.Reader (MonadReader, ReaderT (runReaderT), ask)
+import Control.Monad.State.Strict (
+  MonadState,
+  StateT,
+  evalStateT,
+  runState,
+  state,
+ )
 import EventQueue (EventQueue, HasEventQueue, readEvent, setSpeed)
 import GHC.Generics (Generic)
-import GameState (Event (..), GameState, move)
+import GameState (Event (..), GameState, move, runGameStep)
 import RenderState (
   BoardInfo,
   HasRenderState,
@@ -28,15 +35,13 @@ data AppState = AppState {gameState :: GameState, renderState :: RenderState}
 data Env = Env {boardInfo :: BoardInfo, eventQueue :: EventQueue}
   deriving (Generic)
 
-newtype App m a = App {runApp :: ReaderT Env (StateT AppState m) a}
+newtype App a = App (ReaderT Env (StateT AppState IO) a)
   deriving
-    ( Functor
-    , Applicative
-    , Monad
-    , MonadState AppState
-    , MonadReader Env
-    , MonadIO
-    )
+    (Applicative, Functor, Monad, MonadIO, MonadState AppState, MonadReader Env)
+
+runApp :: Env -> AppState -> App a -> IO a
+runApp env initialState (App app) =
+  (`evalStateT` initialState) $ (`runReaderT` env) app
 
 class (Monad m) => MonadQueue m where
   -- | Pull an Event from the queue
@@ -49,14 +54,19 @@ class (Monad m) => MonadSnake m where
 class (Monad m) => MonadRender m where
   render :: m ()
 
-instance (MonadIO m) => MonadQueue (App m) where
+instance MonadQueue App where
   pullEvent = App $ view #eventQueue >>= liftIO . readEvent
 
-instance (MonadIO m) => MonadSnake (App m) where
-  updateGameState = move
+instance MonadSnake App where
+  updateGameState event = do
+    Env{boardInfo} <- ask
+    zoom #gameState $ runGameStep boardInfo $ move event
+   where
+    zoom l = state . l . runState
+
   updateRenderState = updateMessages
 
-instance (MonadIO m) => MonadRender (App m) where
+instance MonadRender App where
   render = RenderState.render
 
 -- This set the the speed of the game on the score. Notice the constraint give access to all the components.
@@ -79,6 +89,5 @@ gameloop = do
   isGameOver <- use $ #renderState . #gameOver
   unless isGameOver gameloop
 
--- Run the application as usual
 run :: Env -> AppState -> IO ()
-run env app = (`evalStateT` app) $ (`runReaderT` env) $ runApp gameloop
+run env initialState = runApp env initialState gameloop
