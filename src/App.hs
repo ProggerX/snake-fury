@@ -34,27 +34,19 @@ newtype App a = App (RWST Env () AppState IO a)
 runApp :: Env -> AppState -> App a -> IO a
 runApp env initialState (App app) = fst <$> evalRWST app env initialState
 
-class (Monad m) => MonadQueue m where
-  -- | Pull an Event from the queue
-  pullEvent :: m Event
+-- | Pull an Event from the queue
+pullEvent :: App Event
+pullEvent = App $ view #eventQueue >>= liftIO . readEvent
 
-class (Monad m) => MonadSnake m where
-  updateGameState :: Event -> m [RenderMessage]
-  updateRenderState :: [RenderMessage] -> m ()
+updateGameState :: Event -> App [RenderMessage]
+updateGameState = App . magnify #boardInfo . zoom #gameState . move
 
-class (Monad m) => MonadRender m where
-  render :: m ()
+updateRenderState :: [RenderMessage] -> App ()
+updateRenderState =
+  App . magnify #boardInfo . zoom #renderState . updateMessages
 
-instance MonadQueue App where
-  pullEvent = App $ view #eventQueue >>= liftIO . readEvent
-
-instance MonadSnake App where
-  updateGameState = App . magnify #boardInfo . zoom #gameState . move
-  updateRenderState =
-    App . magnify #boardInfo . zoom #renderState . updateMessages
-
-instance MonadRender App where
-  render = App $ magnify #boardInfo $ zoom #renderState RenderState.render
+render :: App ()
+render = App $ magnify #boardInfo $ zoom #renderState RenderState.render
 
 -- This set the the speed of the game on the score. Notice the constraint give access to all the components.
 setSpeedOnScore :: App Int
@@ -64,7 +56,7 @@ setSpeedOnScore = do
   liftIO $ setSpeed s queue
 
 -- This is one step of the logic: read from the queue and-then update the game state and-then update the render state and-then render
-gameStep :: (MonadQueue m, MonadSnake m, MonadRender m) => m ()
+gameStep :: App ()
 gameStep = pullEvent >>= updateGameState >>= updateRenderState >>= pure App.render
 
 -- The game loop implementation is provided. To pretty much can read in english.
