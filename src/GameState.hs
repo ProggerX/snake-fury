@@ -102,7 +102,7 @@ makeRandomPoint = do
   zoomRandomGen $ randomR ((1, 1), (height, width))
 
 zoomRandomGen ::
-  (MonadState s m, HasGameState s, MonadReader env m, HasBoardInfo env) => (StdGen -> (a, StdGen)) -> m a
+  (MonadState s m, HasGameState s) => (StdGen -> (a, StdGen)) -> m a
 zoomRandomGen f = do
   as <- get
   let st = getGameState as
